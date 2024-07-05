@@ -12,10 +12,10 @@ require("randomForest") # solo se usa para imputar nulos
 # "mtry" = 30, cantidad de variables que evalua para hacer un split
 #  generalmente sqrt(ncol(dtrain))
 param <- list(
-  "num.trees" = 300, # cantidad de arboles
+  "num.trees" = 500, # cantidad de arboles
   "mtry" = 13,
-  "min.node.size" = 50, # tamaño minimo de las hojas
-  "max.depth" = 10 # 0 significa profundidad infinita
+  "min.node.size" = 600, # tamaño minimo de las hojas
+  "max.depth" = 8 # 0 significa profundidad infinita
 )
 
 #------------------------------------------------------------------------------
@@ -57,6 +57,7 @@ modelo <- ranger(
   data = dtrain,
   probability = TRUE, # para que devuelva las probabilidades
   num.trees = param$num.trees,
+  min.bucket = 250,
   mtry = param$mtry,
   min.node.size = param$min.node.size,
   max.depth = param$max.depth
