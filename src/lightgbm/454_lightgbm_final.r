@@ -18,11 +18,15 @@ PARAM$input$training <- c(202107) # meses donde se entrena el modelo
 PARAM$input$future <- c(202109) # meses donde se aplica el modelo
 
 
-PARAM$finalmodel$num_iterations <- 1417
-PARAM$finalmodel$learning_rate <- 0.0102013840809341
-PARAM$finalmodel$feature_fraction <- 0.877014896215467
-PARAM$finalmodel$min_data_in_leaf <- 759
-PARAM$finalmodel$num_leaves <- 254
+PARAM$finalmodel$num_iterations <- 981
+PARAM$finalmodel$learning_rate <- 0.0102037332618226
+PARAM$finalmodel$feature_fraction <- 0.915746846086552
+PARAM$finalmodel$min_data_in_leaf <- 758
+PARAM$finalmodel$num_leaves <- 336
+PARAM$finalmodel$lambda_l1 <- 0.884986462005368
+PARAM$finalmodel$lambda_l2 <- 37.1013431834535
+PARAM$finalmodel$max_depth <- 15
+
 
 
 PARAM$finalmodel$max_bin <- 31
@@ -89,6 +93,10 @@ modelo <- lgb.train(
     num_leaves = PARAM$finalmodel$num_leaves,
     min_data_in_leaf = PARAM$finalmodel$min_data_in_leaf,
     feature_fraction = PARAM$finalmodel$feature_fraction,
+    num_leaves = PARAM$finalmodel$num_leaves,
+    lambda_l1 = PARAM$finalmodel$lambda_l1,
+    lambda_l2 = PARAM$finalmodel$lambda_l2,
+    max_depth = PARAM$finalmodel$max_depth,
     seed = ksemilla_azar
   )
 )
