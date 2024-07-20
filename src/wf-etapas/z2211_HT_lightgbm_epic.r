@@ -15,6 +15,7 @@ gc(full = TRUE) # garbage collection
 require("data.table")
 require("rlist")
 require("yaml")
+require("primes")
 
 require("lightgbm")
 
@@ -102,11 +103,33 @@ EstimarGanancia_lightgbm <- function(x) {
   # hago la union de los parametros basicos y los moviles que vienen en x
   param_completo <- c(envg$PARAM$lgb_basicos, x)
 
+  if( "learning_rate_log" %in% names(param_completo) )
+   param_completo$learning_rate <- 2.0 ^ param_completo$learning_rate_log
+
+  if( "feature_fraction_log" %in% names(param_completo) )
+   param_completo$feature_fraction <- 2.0 ^ param_completo$feature_fraction_log
+
+  if( "num_iterations_log" %in% names(param_completo) )
+   param_completo$num_iterations <- as.integer( round( 2.0 ^ param_completo$num_iterations_log ) )
+
+  # para que extra_trees pueda ser  c( 0, 1, integer )
   if( "extra_trees"  %in%  names(param_completo) )
    param_completo$extra_trees <- as.logical( param_completo$extra_trees )
 
+  # para que is_unbalance pueda ser  c( 0, 1, integer )
   if( "is_unbalance"  %in%  names(param_completo) )
    param_completo$is_unbalance <- as.logical( param_completo$is_unbalance )
+
+  # hago la transformacion de leaf_size_log y  coverage
+  if( "leaf_size_log"  %in% names(param_completo) )
+  {
+    # primero defino el tamaño de las hojas
+    param_completo$min_data_in_leaf <- pmax( 1,  round( nrow(dtrain) * ( 2.0 ^ param_completo$leaf_size_log ))  )
+    # luego la cantidad de hojas en funcion del valor anterior, el coverage, y la cantidad de registros
+    param_completo$num_leaves <- pmin( 131072, 
+     pmax( 2,  round( ((2.0^param_completo$coverage_log)) * nrow( dtrain ) / param_completo$min_data_in_leaf ) ) )
+  }
+
 
 
   param_completo$early_stopping_rounds <-
@@ -128,47 +151,142 @@ EstimarGanancia_lightgbm <- function(x) {
 
   cant_corte <- vcant_optima[modelo_train$best_iter]
 
-  # aplico el modelo a testing y calculo la ganancia
-  prediccion <- predict(
-    modelo_train,
-    data.matrix(dataset_test[, campos_buenos, with = FALSE])
-  )
+  tiempo_normals <- c()
+  gan_normals <- c()
+  cant_normals <- c()
+  for( iexp in seq(envg$PARAM$train$repeticiones_exp) )
+  {
+    # donde acumulo el semillerio
+    tb_semillerio <- as.data.table( list( prob_acum = rep(0, nrow(dataset_test)) ))
 
-  tbl <- copy(dataset_test[, list("gan" = 
-    ifelse(get(envg$PARAM$dataset_metadata$clase) %in%  envg$PARAM$train$positivos, 
-       envg$PARAM$train$gan1, 
-       envg$PARAM$train$gan0))])
+    semi_ganancia_test <- 0
+    semi_cantidad_test_normalizada <- 0
 
-  tbl[, prob := prediccion]
-  setorder(tbl, -prob)
-  tbl[, gan_acum := cumsum(gan)]
-  tbl[, gan_suavizada := frollmean(
-    x = gan_acum, n = envg$PARAM$train$meseta,
-    align = "center", na.rm = TRUE, hasNA = TRUE
-  )]
+    t0_loop <- proc.time()
+    tiempo_loop <- 0.0
+
+    for( isem in seq(envg$PARAM$train$semillerio) )
+    {
+      t0_local <- proc.time()
+      param_ganador <- copy( param_completo )
+      if( "leaf_size_log" %in% param_ganador )  param_ganador$leaf_size_log <- NULL
+      if( "coverage_log" %in% param_ganador )  param_ganador$coverage_log <- NULL
+
+      param_ganador$num_iterations <- modelo_train$best_iter
+      param_ganador$early_stopping <- 0
+      sem <- envg$PARAM$semillas[  (iexp-1)*envg$PARAM$train$repeticiones_exp + isem ]
+      param_ganador$seed <- sem
+
+      set.seed(envg$PARAM$seed, kind = "L'Ecuyer-CMRG")
+      modelo_local <- lgb.train(
+        data = dtrain,
+        param = param_ganador,
+        verbose = -100
+      )
+
+      t1_local <- proc.time()
+      tiempo_local <- as.numeric( t1_local[1] - t0_local[1] + t1_local[2] - t0_local[2] )
+      tiempo_loop <- as.numeric( t1_local[1] - t0_loop[1] + t1_local[2] - t0_loop[2] )
+
+      # aplico el modelo a testing y calculo la ganancia
+      prediccion <- predict(
+        modelo_local,
+        data.matrix(dataset_test[, campos_buenos, with = FALSE])
+      )
+
+      # acumulo en el semillerio
+      tb_semillerio[ , prob_acum := prob_acum + prediccion ]
+
+      tbl1 <- copy(dataset_test[, list("gan" = 
+        ifelse(get(envg$PARAM$dataset_metadata$clase) %in%  envg$PARAM$train$positivos, 
+           envg$PARAM$train$gan1, 
+           envg$PARAM$train$gan0))])
+
+      tbl1[, prob := prediccion]
+      setorder(tbl1, -prob)
+      tbl1[, gan_acum := cumsum(gan)]
+      tbl1[, gan_suavizada := frollmean(
+        x = gan_acum, n = envg$PARAM$train$meseta,
+        align = "center", na.rm = TRUE, hasNA = TRUE
+      )]
 
 
-  ganancia_test <- tbl[, max(gan_suavizada, na.rm = TRUE)]
+      ganancia_test_normalizada <- tbl1[, max(gan_suavizada, na.rm = TRUE)]
+      cantidad_test_normalizada <- which.max(tbl1[, gan_suavizada])
+      cant_normals <- c(cant_normals, cantidad_test_normalizada )
 
-  cantidad_test_normalizada <- which.max(tbl[, gan_suavizada])
+      # ahora para el semillerio
+      tbl2 <- copy(dataset_test[, list("gan" = 
+        ifelse(get(envg$PARAM$dataset_metadata$clase) %in%  envg$PARAM$train$positivos, 
+           envg$PARAM$train$gan1, 
+           envg$PARAM$train$gan0))])
 
-  rm(tbl)
-  gc()
+      tbl2[, prob := tb_semillerio$prob_acum]
+      setorder(tbl2, -prob)
+      tbl2[, gan_acum := cumsum(gan)]
+      tbl2[, gan_suavizada := frollmean(
+        x = gan_acum, n = envg$PARAM$train$meseta,
+        align = "center", na.rm = TRUE, hasNA = TRUE
+      )] 
 
-  ganancia_test_normalizada <- ganancia_test
 
-  # logueo final
+      semi_ganancia_test_normalizada <- tbl2[, max(gan_suavizada, na.rm = TRUE)]
+      semi_cantidad_test_normalizada <- which.max(tbl2[, gan_suavizada])
+
+
+      rm(tbl)
+      gc()
+
+      # logueo final
+      ds <- list("cols" = ncol(dtrain), "rows" = nrow(dtrain))
+      xx <- c(ds, copy(param_completo))
+
+      xx$early_stopping_rounds <- NULL
+      xx$num_iterations <- NULL
+      xx$num_iterations <- modelo_train$best_iter
+      xx$estimulos <- cantidad_test_normalizada
+      xx$qsemillas <- 1
+      xx$semilla <- sem
+      xx$iexp <- iexp
+      xx$tiempo_corrida <- tiempo_local
+      xx$ganancia <- ganancia_test_normalizada
+      xx$metrica <- ganancia_test_normalizada
+      xx$iteracion_bayesiana <- GLOBAL_iteracion
+      mlog_log(xx, arch = "BO_log_detalle.txt")
+
+      xx$estimulos <- semi_cantidad_test_normalizada
+      xx$qsemillas <- isem
+      xx$semilla <- -1
+      xx$iexp <- iexp
+      xx$tiempo_corrida <- tiempo_loop
+      xx$ganancia <- semi_ganancia_test_normalizada
+      xx$metrica <- semi_ganancia_test_normalizada
+      mlog_log(xx, arch = "BO_log_detalle_semi.txt")
+    }
+
+    # acumulo en vector resultados de semillerios completos
+    tiempo_normals <- c( tiempo_normals, tiempo_loop )
+    gan_normals <- c( gan_normals, semi_ganancia_test_normalizada)
+    cant_normals <- c(cant_normals, semi_cantidad_test_normalizada )
+  }
+  
+  # promedio las ganancias y los envios
+  tiempo_test_normalizado <- mean(tiempo_normals)
+  ganancia_test_normalizada <- mean(gan_normals)
+  cantidad_test_normalizada <- round(mean(cant_normals))
+
   ds <- list("cols" = ncol(dtrain), "rows" = nrow(dtrain))
   xx <- c(ds, copy(param_completo))
 
   xx$early_stopping_rounds <- NULL
   xx$num_iterations <- modelo_train$best_iter
   xx$estimulos <- cantidad_test_normalizada
-  xx$qsemillas <- 1L
+  xx$qexp <- envg$PARAM$train$repeticiones_exp
+  xx$semillerio <- envg$PARAM$train$semillerio
+  xx$tiempo_corrida <- tiempo_test_normalizado
   xx$ganancia <- ganancia_test_normalizada
   xx$metrica <- ganancia_test_normalizada
   xx$iteracion_bayesiana <- GLOBAL_iteracion
-
 
   superacion <- FALSE
   # voy grabando las mejores column importance
@@ -200,9 +318,13 @@ EstimarGanancia_lightgbm <- function(x) {
 
   mlog_log(xx, arch = "BO_log.txt", parentreplicate= superacion)
 
-  cat( "Fin EstimarGanancia_lightgbm()\n")
-  set.seed(envg$PARAM$lgb_semilla, kind = "L'Ecuyer-CMRG")
-  return(ganancia_test_normalizada)
+  # retorno el vector con las dos variables que optimizo al mismo tiempo
+  set.seed(envg$PARAM$seed, kind = "L'Ecuyer-CMRG")
+  return( c( xx$metrica, 
+             xx$tiempo_corrida
+            )
+        )  # tiempo al azar
+
 }
 #------------------------------------------------------------------------------
 # esta es la funcion mas mistica de toda la asignatura
@@ -428,11 +550,20 @@ parametrizar  <- function( lparam )
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 # Aqui empieza el programa
-cat( "z2201_HT_lightgbm_gan.r  START\n")
+cat( "z2211_HT_lightgbm_epic.r  START\n")
 action_inicializar() 
 
 # cargo las semillas
 envg$PARAM$lgb_semilla <- envg$PARAM$semilla
+
+# genero las semillas con las que voy a trabajar
+#  ninguna de ellas es exactamente la original del alumno
+primos <- generate_primes(min = 100000, max = 1000000)
+set.seed(envg$PARAM$semilla)
+# me quedo con PARAM$semillerio  primos al azar
+total_semillas <- envg$PARAM$train$repeticiones_exp * envg$PARAM$train$semillerio
+envg$PARAM$semillas <- sample(primos)[1:total_semillas]
+
 
 
 # apertura de los parametros de LightGBM
@@ -576,6 +707,7 @@ mlog_addfile("BO_log.txt",
              mlflow_run= envg$PARAM$experimento,
              cols_fijas= list(expw=envg$PARAM$experimento_largo) )
 
+
 rm(dataset)
 gc()
 
@@ -610,25 +742,38 @@ configureMlr(show.learner.output = FALSE)
 
 # configuro la busqueda bayesiana,  los hiperparametros que se van a optimizar
 # por favor, no desesperarse por lo complejo
-obj.fun <- makeSingleObjectiveFunction(
+obj.fun <- makeMultiObjectiveFunction(
   fn = funcion_optimizar, # la funcion que voy a maximizar
-  minimize = FALSE, # estoy Maximizando la ganancia
-  noisy = TRUE,
+  minimize = c( FALSE, TRUE ), # estoy Maximizando la ganancia y Minimizando el tiempo
+  noisy = FALSE,
   par.set = envg$PARAM$bo_lgb, # definido al comienzo del programa
-  has.simple.signature = FALSE # paso los parametros en una lista
+  has.simple.signature = FALSE, # paso los parametros en una lista
+  n.objectives = 2L
 )
 
 # archivo donde se graba y cada cuantos segundos
 ctrl <- makeMBOControl(
   save.on.disk.at.time = 60,
-  save.file.path = "bayesiana.RDATA"
+  save.file.path = "bayesiana.RDATA",
+  n.objectives = 2L,
+  y.name = c("ganancia", "tiempo")
 )
 
-ctrl <- setMBOControlTermination(ctrl,
+ctrl <- setMBOControlTermination(
+  ctrl,
   iters = envg$PARAM$bo_iteraciones
 ) # cantidad de iteraciones
 
 ctrl <- setMBOControlInfill(ctrl, crit = makeMBOInfillCritEI())
+
+ctrl <- setMBOControlMultiObj(
+    ctrl,
+    method = "parego",
+    parego.s = 100000L,
+    parego.rho = 0.05,
+    parego.sample.more.weights = 1,
+    parego.normalize = front
+)
 
 # establezco la funcion que busca el maximo
 surr.km <- makeLearner("regr.km",
@@ -674,4 +819,4 @@ file.remove("z-Rcanresume.txt")
 #  archivos tiene a los files que debo verificar existen para no abortar
 
 action_finalizar( archivos = c("BO_log.txt")) 
-cat( "z2201_HT_lightgbm_gan.r  END\n")
+cat( "z2211_HT_lightgbm_epic.r  END\n")
