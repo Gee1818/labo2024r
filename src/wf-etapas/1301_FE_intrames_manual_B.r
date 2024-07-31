@@ -56,25 +56,25 @@ AgregarVariables_IntraMes <- function(dataset) {
   #dataset[, vm_status02 := Master_status + Visa_status]
 
   #dataset[, vm_status03 := pmax(
-    ifelse(is.na(Master_status), 10, Master_status),
-    ifelse(is.na(Visa_status), 10, Visa_status)
-  )]
+  #  ifelse(is.na(Master_status), 10, Master_status),
+  #  ifelse(is.na(Visa_status), 10, Visa_status)
+  #)]
 
   #dataset[, vm_status04 := ifelse(is.na(Master_status), 10, Master_status)
-    + ifelse(is.na(Visa_status), 10, Visa_status)]
+  #  + ifelse(is.na(Visa_status), 10, Visa_status)]
 
   #dataset[, vm_status05 := ifelse(is.na(Master_status), 10, Master_status)
-    + 100 * ifelse(is.na(Visa_status), 10, Visa_status)]
+  #  + 100 * ifelse(is.na(Visa_status), 10, Visa_status)]
 
   #dataset[, vm_status06 := ifelse(is.na(Visa_status),
-    ifelse(is.na(Master_status), 10, Master_status),
-    Visa_status
-  )]
+  #  ifelse(is.na(Master_status), 10, Master_status),
+  #  Visa_status
+  #)]
 
   #dataset[, mv_status07 := ifelse(is.na(Master_status),
-    ifelse(is.na(Visa_status), 10, Visa_status),
-    Master_status
-  )]
+  #  ifelse(is.na(Visa_status), 10, Visa_status),
+  #  Master_status
+  #)]
 
 
   # combino MasterCard y Visa
@@ -85,9 +85,9 @@ AgregarVariables_IntraMes <- function(dataset) {
   dataset[, vm_msaldototal := rowSums(cbind(Master_msaldototal, Visa_msaldototal), na.rm = TRUE)]
   dataset[, vm_msaldopesos := rowSums(cbind(Master_msaldopesos, Visa_msaldopesos), na.rm = TRUE)]
   #dataset[, vm_msaldodolares := rowSums(cbind(Master_msaldodolares, Visa_msaldodolares), na.rm = TRUE)]
-  #dataset[, vm_mconsumospesos := rowSums(cbind(Master_mconsumospesos, Visa_mconsumospesos), na.rm = TRUE)]
-  #dataset[, vm_mconsumosdolares := rowSums(cbind(Master_mconsumosdolares, Visa_mconsumosdolares), na.rm = TRUE)]
-  #dataset[, vm_mlimitecompra := rowSums(cbind(Master_mlimitecompra, Visa_mlimitecompra), na.rm = TRUE)]
+  dataset[, vm_mconsumospesos := rowSums(cbind(Master_mconsumospesos, Visa_mconsumospesos), na.rm = TRUE)]
+  dataset[, vm_mconsumosdolares := rowSums(cbind(Master_mconsumosdolares, Visa_mconsumosdolares), na.rm = TRUE)]
+  dataset[, vm_mlimitecompra := rowSums(cbind(Master_mlimitecompra, Visa_mlimitecompra), na.rm = TRUE)]
   #dataset[, vm_madelantopesos := rowSums(cbind(Master_madelantopesos, Visa_madelantopesos), na.rm = TRUE)]
   #dataset[, vm_madelantodolares := rowSums(cbind(Master_madelantodolares, Visa_madelantodolares), na.rm = TRUE)]
   #dataset[, vm_fultimo_cierre := pmax(Master_fultimo_cierre, Visa_fultimo_cierre, na.rm = TRUE)]
